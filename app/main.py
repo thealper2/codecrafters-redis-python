@@ -32,7 +32,7 @@ def encode_bulk(s):
     return b"$" + str(len(s)).encode() + b"\r\n" + s + b"\r\n"
 
 
-def handle_client(connection):
+def handle_client(connection, store):
     with connection:
         buffer = b""
         while True:
@@ -73,9 +73,10 @@ def handle_client(connection):
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
+    store = {}
     while True:
         connection, _ = server_socket.accept()
-        thread = threading.Thread(target=handle_client, args=(connection,))
+        thread = threading.Thread(target=handle_client, args=(connection, store))
         thread.start()
 
 

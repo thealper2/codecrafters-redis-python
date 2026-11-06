@@ -61,6 +61,14 @@ def handle_client(connection):
                     connection.sendall(b"+PONG\r\n")
                 elif cmd == b"ECHO" and len(parts) >= 2:
                     connection.sendall(encode_bulk(parts[1]))
+                elif cmd == b"SET" and len(parts) >= 3:
+                    store[parts[1]] = parts[2]
+                    connection.sendall(b"+OK\r\n")
+                elif cmd == b"GET" and len(parts) >= 2:
+                    if parts[1] in store:
+                        connection.sendall(encode_bulk(store[parts[1]]))
+                    else:
+                        connection.sendall(b"$-1\r\n")
     
 
 def main():

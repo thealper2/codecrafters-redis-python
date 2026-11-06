@@ -1,10 +1,9 @@
 import socket  # noqa: F401
 import threading
+import time
 
 def parse_resp(data):
-    if not data:
-        return None
-    if data[0:1] != b"*":
+    if not data or data[0:1] != b"*":
         return None
     pos = data.find(b"\r\n")
     if pos == -1:
@@ -25,14 +24,14 @@ def parse_resp(data):
         parts.append(data[pos:pos + length])
         pos += length + 2
         
-    return parts
+    return parts, pos
 
 
 def encode_bulk(s):
     return b"$" + str(len(s)).encode() + b"\r\n" + s + b"\r\n"
 
 
-def handle_client(connection, store):
+def handle_client(connection, store, lock):
     with connection:
         buffer = b""
         while True:
@@ -62,11 +61,35 @@ def handle_client(connection, store):
                 elif cmd == b"ECHO" and len(parts) >= 2:
                     connection.sendall(encode_bulk(parts[1]))
                 elif cmd == b"SET" and len(parts) >= 3:
-                    store[parts[1]] = parts[2]
+                    key = parts[1]
+                    value = parts[2]
+                    expiry = None
+                    i = 3
+                    while i < len(parts):
+                        opt = parts[i].upper()
+                        if opt in (b"PX", b"EX") and i + 1 < len(parts):
+                            amount = int(parts[i + 1])
+                            if opt == b"PX":
+                                expiry = time.time() + amount / 1000.0
+                            else:
+                                expiry = time.time() + amount
+                            i += 2
+                        else:
+                            i += 1
+                    with lock:
+                        store[key] = (value, expiry)
                     connection.sendall(b"+OK\r\n")
                 elif cmd == b"GET" and len(parts) >= 2:
-                    if parts[1] in store:
-                        connection.sendall(encode_bulk(store[parts[1]]))
+                    key = parts[1]
+                    with lock:
+                        entry = store.get(key)
+                        if entry is not None:
+                            value, expiry = entry
+                            if expiry is not None and time.time() >= expiry:
+                                del store[key]
+                                entry = None
+                    if entry is not None:
+                        connection.sendall(encode_bulk(entry[0]))
                     else:
                         connection.sendall(b"$-1\r\n")
     
@@ -74,9 +97,10 @@ def handle_client(connection, store):
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
     store = {}
+    lock = threading.Lock()
     while True:
         connection, _ = server_socket.accept()
-        thread = threading.Thread(target=handle_client, args=(connection, store))
+        thread = threading.Thread(target=handle_client, args=(connection, store, lock))
         thread.start()
 
 

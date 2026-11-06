@@ -40,20 +40,10 @@ def handle_client(connection, store, lock):
                 break
             buffer += data
             while True:
-                parts = parse_resp(buffer)
-                if parts is None:
+                result = parse_resp(buffer)
+                if result is None:
                     break
-                consumed = 0
-                if parts:
-                    pass
-                p = buffer.find(b"\r\n")
-                count = int(buffer[1:p])
-                pos = p + 2
-                for _ in range(count):
-                    end = buffer.find(b"\r\n", pos)
-                    length = int(buffer[pos + 1:end])
-                    pos = end + 2 + length + 2
-                consumed = pos
+                parts, consumed = result
                 buffer = buffer[consumed:]
                 cmd = parts[0].upper()
                 if cmd == b"PING":

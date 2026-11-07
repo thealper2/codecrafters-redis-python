@@ -75,6 +75,7 @@ def encode_entries(entries):
 def handle_client(connection, store, lock):
     with connection:
         buffer = b""
+        in_multi = False
         while True:
             data = connection.recv(1024)
             if not data:
@@ -334,7 +335,11 @@ def handle_client(connection, store, lock):
                     else:
                         connection.sendall(b":" + str(n).encode() + b"\r\n")
                 elif cmd == b"MULTI":
+                    in_multi = True
                     connection.sendall(b"+OK\r\n")
+                elif cmd == b"EXEC":
+                    if not in_multi:
+                        connection.sendall(b"- ERR EXEC without MULTI\r\n")
                     
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

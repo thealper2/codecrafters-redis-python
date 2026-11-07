@@ -285,10 +285,13 @@ def handle_client(connection, store, lock):
                         with stream_cv:
                             out = read_streams(store, lock, keys, ids)
                             while not out:
-                                remaining = deadline - time.time()
-                                if remaining <= 0:
-                                    break
-                                stream_cv.wait(remaining)
+                                if block == 0:
+                                    stream_cv.wait()
+                                else:
+                                    remaining = deadline - time.time()
+                                    if remaining <= 0:
+                                        break
+                                    stream_cv.wait(remaining)
                                 out = read_streams(store, lock, keys, ids)
                     if not out and block is not None:
                         connection.sendall(b"*-1\r\n")

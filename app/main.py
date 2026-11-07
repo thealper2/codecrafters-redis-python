@@ -402,7 +402,7 @@ def handle_client(connection, store, lock):
                     execute(parts, connection, store, lock)
                     
 def main():
-    porrt = 6379
+    port = 6379
     if "--port" in sys.argv:
         port = int(sys.argv[sys.argv.index("--port") + 1])
     server_socket = socket.create_server(("localhost", port), reuse_port=True)

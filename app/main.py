@@ -278,6 +278,17 @@ def handle_client(connection, store, lock):
                     rest = parts[upper.index(b"STREAMS") + 1:]
                     half = len(rest) // 2
                     keys, ids = rest[:half], rest[half:]
+                    with lock:
+                        resolved = []
+                        for k, i in zip(keys, ids):
+                            if i == b"$":
+                                entry = store.get(k)
+                                if entry is not None and entry[0] == b"stream" and entry[1]:
+                                    i = entry[1][-1][0]
+                                else:
+                                    i = b"0-0"
+                            resolved.append(i)
+                        ids = resolved
                     if block is None:
                         out = read_streams(store, lock, keys, ids)
                     else:

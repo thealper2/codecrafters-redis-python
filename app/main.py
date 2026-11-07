@@ -107,7 +107,13 @@ def handle_client(connection, store, lock):
                     with lock:
                         entry = store.get(key)
                         if entry is not None and entry[0] == b"list":
-                            items = entry[1][start:stop + 1]
+                            lst = entry[1]
+                            n = len(lst)
+                            s = start + n if start < 0 else start
+                            e = stop + n if stop < 0 else stop
+                            s = max(s, 0)
+                            e = max(e, -1)
+                            items = lst[s:e + 1]
                         else:
                             items = []
                     connection.sendall(encode_array(items))

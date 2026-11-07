@@ -311,6 +311,29 @@ def handle_client(connection, store, lock):
                         for k, res in out:
                             body += b"*2\r\n" + encode_bulk(k) + encode_entries(res)
                         connection.sendall(body)
+                elif cmd == b"INCR" and len(parts) >= 2:
+                    key = parts[1]
+                    err = False
+                    with lock:
+                        entry = store.get(key)
+                        if entry is not None and len(entry) == 2 and entry[1] is not None and time.time() >= entry[1]:
+                            entry = None
+                        if entry is None:
+                            n = 1
+                            expiry = None
+                        else:
+                            try:
+                                n = int(entry[0]) + 1
+                                expiry = entry[1]
+                            except ValueError:
+                                err = True
+                        if not err:
+                            store[key] = (str(n).encode(), expiry)
+                    if err:
+                        connection.sendall(b"-ERR value is not an integer or out of range\r\n")
+                    else:
+                        connection.sendall(b":" + str(n).encode() + b"\r\n")
+                        
                     
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

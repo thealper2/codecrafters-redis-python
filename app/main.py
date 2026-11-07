@@ -393,6 +393,9 @@ def handle_client(connection, store, lock):
                             for k in parts[1:]:
                                 watched[k] = versions.get(k, 0)
                         connection.sendall(b"+OK\r\n")
+                elif cmd == b"UNWATCH":
+                    watched = {}
+                    connection.sendall(b"+OK\r\n")
                 else:
                     execute(parts, connection, store, lock)
                     

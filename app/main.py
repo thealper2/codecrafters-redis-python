@@ -37,6 +37,7 @@ def encode_array(items):
 
 
 waiters = {}
+versions = {}
 WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD")
 stream_cv = threading.Condition()
 

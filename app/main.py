@@ -37,7 +37,22 @@ def encode_array(items):
 
 
 waiters = {}
+stream_cv = threading.Condition()
 
+def read_streams(store, lock, keys, ids):
+    out = []
+    with lock:
+        for k, i in zip(keys, ids):
+            after = parse_range_id(i, 0)
+            entry = store.get(k)
+            entries = entry[1] if entry is not None and entry[0] == b"stream" else []
+            res = [
+                (eid, f) for eid, f in entries
+                if tuple(int(x) for x in eid.split(b"-")) > after
+            ]
+            if res:
+                out.append((k, res))  
+    return out
 
 def parse_range_id(s, default_seq):
     if s == b"-":
@@ -243,6 +258,8 @@ def handle_client(connection, store, lock):
                     if err:
                         connection.sendall(err)
                     else:
+                        with stream_cv:
+                            stream_cv.notify_all()
                         connection.sendall(encode_bulk(entry_id))
                 elif cmd == b"XRANGE" and len(parts) >= 4:
                     start = parse_range_id(parts[2], 0)
@@ -256,27 +273,31 @@ def handle_client(connection, store, lock):
                         ]
                     connection.sendall(encode_entries(result))
                 elif cmd == b"XREAD":
-                    idx = [p.upper() for p in parts].index(b"STREAMS")
-                    rest = parts[idx + 1:]
+                    upper = [p.upper() for p in parts]
+                    block = int(parts[upper.index(b"BLOCK") + 1]) if b"BLOCK" in upper else None
+                    rest = parts[upper.index(b"STREAMS") + 1:]
                     half = len(rest) // 2
                     keys, ids = rest[:half], rest[half:]
-                    out = []
-                    with lock:
-                        for k, i in zip(keys, ids):
-                            after = parse_range_id(i, 0)
-                            entry = store.get(k)
-                            entries = entry[1] if entry is not None and entry[0] == b"stream" else []
-                            res = [
-                                (eid, f) for eid, f in entries
-                                if tuple(int(x) for x in eid.split(b"-")) > after
-                            ]
-                            if res:
-                                out.append((k, res))
-                    body = b"*" + str(len(out)).encode() + b"\r\n"
-                    for k, res in out:
-                        body += b"*2\r\n" + encode_bulk(k) + encode_entries(res)
-                    connection.sendall(body)
-
+                    if block is None:
+                        out = read_streams(store, lock, keys, ids)
+                    else:
+                        deadline = time.time() + block / 1000.0
+                        with stream_cv:
+                            out = read_streams(store, lock, keys, ids)
+                            while not out:
+                                remaining = deadline - time.time()
+                                if remaining <= 0:
+                                    break
+                                stream_cv.wait(remaining)
+                                out = read_streams(store, lock, keys, ids)
+                    if not out and block is not None:
+                        connection.sendall(b"*-1\r\n")
+                    else:
+                        body = b"*" + str(len(out)).encode() + b"\r\n"
+                        for k, res in out:
+                            body += b"*2\r\n" + encode_bulk(k) + encode_entries(res)
+                        connection.sendall(body)
+                    
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
     store = {}

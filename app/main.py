@@ -199,6 +199,8 @@ def handle_client(connection, store, lock):
                             entries = entry[1]
                         else:
                             entries = []
+                        if entry_id == b"*":
+                            entry_id = str(int(time.time() * 1000)).encode() + b"-*"
                         ms_part, seq_part = entry_id.split(b"-")
                         ms = int(ms_part)
                         if seq_part == b"*":

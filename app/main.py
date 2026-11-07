@@ -192,15 +192,27 @@ def handle_client(connection, store, lock):
                     key = parts[1]
                     entry_id = parts[2]
                     fields = parts[3:]
+                    ms, seq = (int(x) for x in entry_id.split(b"-"))
+                    err = None
                     with lock:
                         entry = store.get(key)
                         if entry is not None and entry[0] == b"stream":
                             entries = entry[1]
                         else:
                             entries = []
-                        entries.append((entry_id, fields))
-                        store[key] = (b"stream", entries, None)
-                    connection.sendall(encode_bulk(entry_id))
+                        if (ms, seq) <= (0, 0):
+                            err = b"-ERR The ID specified in XADD must be greater than 0-0\r\n"
+                        elif entries:
+                            lms, lseq = (int(x) for x in entries[-1][0].split(b"-"))
+                            if (ms, seq) <= (lms, lseq):
+                                err = b"-ERR The ID specified in XADD is equal or smaller than the target stream top item \r\n"
+                        if err is None:
+                            entries.append((entry_id, fields))
+                            store[key] = (b"stream", entries, None)
+                    if err:
+                        connection.sendall(err)
+                    else:
+                        connection.sendall(encode_bulk(entry_id))
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

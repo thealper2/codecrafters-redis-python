@@ -339,7 +339,7 @@ def handle_client(connection, store, lock):
                     connection.sendall(b"+OK\r\n")
                 elif cmd == b"EXEC":
                     if not in_multi:
-                        connection.sendall(b"- ERR EXEC without MULTI\r\n")
+                        connection.sendall(b"-ERR EXEC without MULTI\r\n")
                     
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

@@ -40,6 +40,10 @@ waiters = {}
 
 
 def parse_range_id(s, default_seq):
+    if s == b"-":
+        return (0, 0)
+    if s == b"+":
+        return (float("inf"), float("inf"))
     if b"-" in s:
         a, b = s.split(b"-")
         return int(a), int(b)

@@ -365,6 +365,13 @@ def handle_client(connection, store, lock):
                             out += cap.data
                         queue = []
                         connection.sendall(out)
+                elif cmd == b"DISCARD":
+                    if not in_multi:
+                        connection.sendall(b"-ERR DISCARD without MULTI\r\n")
+                    else:
+                        in_multi = False
+                        queue = []
+                        connection.sendall(b"+OK\r\n")
                 else:
                     execute(parts, connection, store, lock)
                     

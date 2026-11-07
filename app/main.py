@@ -333,7 +333,8 @@ def handle_client(connection, store, lock):
                         connection.sendall(b"-ERR value is not an integer or out of range\r\n")
                     else:
                         connection.sendall(b":" + str(n).encode() + b"\r\n")
-                        
+                elif cmd == b"MULTI":
+                    connection.sendall(b"+OK\r\n")
                     
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

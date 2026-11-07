@@ -31,6 +31,10 @@ def encode_bulk(s):
     return b"$" + str(len(s)).encode() + b"\r\n" + s + b"\r\n"
 
 
+def encode_array(items):
+    return b"*" + str(len(items)).encode() + b"\r\n" + b"".join(encode_bulk(x) for x in items)
+
+
 def handle_client(connection, store, lock):
     with connection:
         buffer = b""
@@ -96,6 +100,17 @@ def handle_client(connection, store, lock):
                         store[key] = (b"list", lst, expiry)
                         count = len(lst)
                     connection.sendall(b":" + str(count).encode() + b"\r\n")
+                elif cmd == b"LRANGE" and len(parts) >= 4:
+                    key = parts[1]
+                    start = int(parts[2])
+                    stop = int(parts[3])
+                    with lock:
+                        entry = store.get(key)
+                        if entry is not None and entry[0] == b"list":
+                            items = entry[1][start:stop + 1]
+                        else:
+                            items = []
+                    connection.sendall(encode_array(items))
     
 
 def main():

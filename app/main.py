@@ -192,7 +192,6 @@ def handle_client(connection, store, lock):
                     key = parts[1]
                     entry_id = parts[2]
                     fields = parts[3:]
-                    ms, seq = (int(x) for x in entry_id.split(b"-"))
                     err = None
                     with lock:
                         entry = store.get(key)
@@ -200,6 +199,17 @@ def handle_client(connection, store, lock):
                             entries = entry[1]
                         else:
                             entries = []
+                        ms_part, seq_part = entry_id.split(b"-")
+                        ms = int(ms_part)
+                        if seq_part == b"*":
+                            last = entries[-1][0].split(b"-") if entries else None
+                            if last and int(last[0]) == ms:
+                                seq = int(last[1]) + 1
+                            else:
+                                seq = 1 if ms == 0 else 0
+                            entry_id = str(ms).encode() + b"-" + str(seq).encode()
+                        else:
+                            seq = int(seq_part)
                         if (ms, seq) <= (0, 0):
                             err = b"-ERR The ID specified in XADD must be greater than 0-0\r\n"
                         elif entries:

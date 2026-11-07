@@ -173,6 +173,21 @@ def handle_client(connection, store, lock):
                         connection.sendall(encode_array([key, slot[0]]))
                     else:
                         connection.sendall(b"*-1\r\n")
+                elif cmd == b"TYPE" and len(parts) >= 2:
+                    key = parts[1]
+                    with lock:
+                        entry = store.get(key)
+                        if entry is not None and len(entry) == 2:
+                            if entry[1] is not None and time.time() >= entry[1]:
+                                del store[key]
+                                t = b"none"
+                            else:
+                                t = b"string"
+                        elif entry is not None:
+                            t = entry[0]
+                        else:
+                            t = b"none"
+                    connection.sendall(b"+" + t + b"\r\n")
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

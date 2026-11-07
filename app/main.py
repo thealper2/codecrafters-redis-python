@@ -72,6 +72,263 @@ def encode_entries(entries):
     return out
 
 
+class Capture:
+    def __init__(self):
+        self.data = b""
+    
+    def sendall(self, b):
+        self.data += b
+
+def execute(parts, connection, store, lock):
+    cmd = parts[0].upper()
+    if cmd == b"PING":
+        connection.sendall(b"+PONG\r\n")
+    elif cmd == b"ECHO" and len(parts) >= 2:
+        connection.sendall(encode_bulk(parts[1]))
+    elif cmd == b"SET" and len(parts) >= 3:
+        key = parts[1]
+        value = parts[2]
+        expiry = None
+        i = 3
+        while i < len(parts):
+            opt = parts[i].upper()
+            if opt in (b"PX", b"EX") and i + 1 < len(parts):
+                amount = int(parts[i + 1])
+                if opt == b"PX":
+                    expiry = time.time() + amount / 1000.0
+                else:
+                    expiry = time.time() + amount
+                i += 2
+            else:
+                i += 1
+        with lock:
+            store[key] = (value, expiry)
+        connection.sendall(b"+OK\r\n")
+    elif cmd == b"GET" and len(parts) >= 2:
+        key = parts[1]
+        with lock:
+            entry = store.get(key)
+            if entry is not None:
+                value, expiry = entry
+                if expiry is not None and time.time() >= expiry:
+                    del store[key]
+                    entry = None
+        if entry is not None:
+            connection.sendall(encode_bulk(entry[0]))
+        else:
+            connection.sendall(b"$-1\r\n")
+    elif cmd in (b"RPUSH", b"LPUSH") and len(parts) >= 3:
+        key = parts[1]
+        with lock:
+            entry = store.get(key)
+            if entry is not None and entry[0] == b"list":
+                lst = entry[1]
+                expiry = entry[2]
+            else:
+                lst = []
+                expiry = None
+            if cmd == b"RPUSH":
+                lst.extend(parts[2:])
+            else:
+                lst[0:0] = parts[2:][::-1]
+            store[key] = (b"list", lst, expiry)
+            count = len(lst)
+            q = waiters.get(key)
+            while q and lst:
+                ev, slot = q.popleft()
+                slot.append(lst.pop(0))
+                ev.set()
+        connection.sendall(b":" + str(count).encode() + b"\r\n")
+    elif cmd == b"LRANGE" and len(parts) >= 4:
+        key = parts[1]
+        start = int(parts[2])
+        stop = int(parts[3])
+        with lock:
+            entry = store.get(key)
+            if entry is not None and entry[0] == b"list":
+                lst = entry[1]
+                n = len(lst)
+                s = start + n if start < 0 else start
+                e = stop + n if stop < 0 else stop
+                s = max(s, 0)
+                e = max(e, -1)
+                items = lst[s:e + 1]
+            else:
+                items = []
+        connection.sendall(encode_array(items))
+    elif cmd == b"LLEN" and len(parts) >= 2:
+        with lock:
+            entry = store.get(parts[1])
+            n = len(entry[1]) if entry is not None and entry[0] == b"list" else 0
+        connection.sendall(b":" + str(n).encode() + b"\r\n")
+    elif cmd == b"LPOP" and len(parts) >= 2:
+        count = int(parts[2]) if len(parts) >= 3 else None
+        with lock:
+            entry = store.get(parts[1])
+            lst = entry[1] if entry is not None and entry[0] == b"list" else None
+            if lst and count is None:
+                item = lst.pop(0)
+            elif lst and count is not None:
+                item = lst[:count]
+                del lst[:count]
+            else:
+                item = None
+        if item is None:
+            connection.sendall(b"$-1\r\n")
+        elif count is None:
+            connection.sendall(encode_bulk(item))
+        else:
+            connection.sendall(encode_array(item))
+    elif cmd == b"BLPOP" and len(parts) >= 3:
+        key = parts[1]
+        timeout = float(parts[-1])
+        ev = threading.Event()
+        slot = []
+        with lock:
+            entry = store.get(key)
+            if entry is not None and entry[0] == b"list" and entry[1]:
+                slot.append(entry[1].pop(0))
+            else:
+                waiters.setdefault(key, deque()).append((ev, slot))
+        if not slot:
+            ev.wait(timeout if timeout > 0 else None)
+        with lock:
+            if not slot:
+                q = waiters.get(key)
+                if q and (ev, slot) in q:
+                    q.remove((ev, slot))
+        if slot:
+            connection.sendall(encode_array([key, slot[0]]))
+        else:
+            connection.sendall(b"*-1\r\n")
+    elif cmd == b"TYPE" and len(parts) >= 2:
+        key = parts[1]
+        with lock:
+            entry = store.get(key)
+            if entry is not None and len(entry) == 2:
+                if entry[1] is not None and time.time() >= entry[1]:
+                    del store[key]
+                    t = b"none"
+                else:
+                    t = b"string"
+            elif entry is not None:
+                t = entry[0]
+            else:
+                t = b"none"
+        connection.sendall(b"+" + t + b"\r\n")
+    elif cmd == b"XADD" and len(parts) >= 5:
+        key = parts[1]
+        entry_id = parts[2]
+        fields = parts[3:]
+        err = None
+        with lock:
+            entry = store.get(key)
+            if entry is not None and entry[0] == b"stream":
+                entries = entry[1]
+            else:
+                entries = []
+            if entry_id == b"*":
+                entry_id = str(int(time.time() * 1000)).encode() + b"-*"
+            ms_part, seq_part = entry_id.split(b"-")
+            ms = int(ms_part)
+            if seq_part == b"*":
+                last = entries[-1][0].split(b"-") if entries else None
+                if last and int(last[0]) == ms:
+                    seq = int(last[1]) + 1
+                else:
+                    seq = 1 if ms == 0 else 0
+                entry_id = str(ms).encode() + b"-" + str(seq).encode()
+            else:
+                seq = int(seq_part)
+            if (ms, seq) <= (0, 0):
+                err = b"-ERR The ID specified in XADD must be greater than 0-0\r\n"
+            elif entries:
+                lms, lseq = (int(x) for x in entries[-1][0].split(b"-"))
+                if (ms, seq) <= (lms, lseq):
+                    err = b"-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n"
+            if err is None:
+                entries.append((entry_id, fields))
+                store[key] = (b"stream", entries, None)
+        if err:
+            connection.sendall(err)
+        else:
+            with stream_cv:
+                stream_cv.notify_all()
+            connection.sendall(encode_bulk(entry_id))
+    elif cmd == b"XRANGE" and len(parts) >= 4:
+        start = parse_range_id(parts[2], 0)
+        end = parse_range_id(parts[3], float("inf"))
+        with lock:
+            entry = store.get(parts[1])
+            entries = entry[1] if entry is not None and entry[0] == b"stream" else []
+            result = [
+                (eid, f) for eid, f in entries
+                if start <= tuple(int(x) for x in eid.split(b"-")) <= end
+            ]
+        connection.sendall(encode_entries(result))
+    elif cmd == b"XREAD":
+        upper = [p.upper() for p in parts]
+        block = int(parts[upper.index(b"BLOCK") + 1]) if b"BLOCK" in upper else None
+        rest = parts[upper.index(b"STREAMS") + 1:]
+        half = len(rest) // 2
+        keys, ids = rest[:half], rest[half:]
+        with lock:
+            resolved = []
+            for k, i in zip(keys, ids):
+                if i == b"$":
+                    entry = store.get(k)
+                    if entry is not None and entry[0] == b"stream" and entry[1]:
+                        i = entry[1][-1][0]
+                    else:
+                        i = b"0-0"
+                resolved.append(i)
+            ids = resolved
+        if block is None:
+            out = read_streams(store, lock, keys, ids)
+        else:
+            deadline = time.time() + block / 1000.0
+            with stream_cv:
+                out = read_streams(store, lock, keys, ids)
+                while not out:
+                    if block == 0:
+                        stream_cv.wait()
+                    else:
+                        remaining = deadline - time.time()
+                        if remaining <= 0:
+                            break
+                        stream_cv.wait(remaining)
+                    out = read_streams(store, lock, keys, ids)
+        if not out and block is not None:
+            connection.sendall(b"*-1\r\n")
+        else:
+            body = b"*" + str(len(out)).encode() + b"\r\n"
+            for k, res in out:
+                body += b"*2\r\n" + encode_bulk(k) + encode_entries(res)
+            connection.sendall(body)
+    elif cmd == b"INCR" and len(parts) >= 2:
+        key = parts[1]
+        err = False
+        with lock:
+            entry = store.get(key)
+            if entry is not None and len(entry) == 2 and entry[1] is not None and time.time() >= entry[1]:
+                entry = None
+            if entry is None:
+                n = 1
+                expiry = None
+            else:
+                try:
+                    n = int(entry[0]) + 1
+                    expiry = entry[1]
+                except ValueError:
+                    err = True
+            if not err:
+                store[key] = (str(n).encode(), expiry)
+        if err:
+            connection.sendall(b"-ERR value is not an integer or out of range\r\n")
+        else:
+            connection.sendall(b":" + str(n).encode() + b"\r\n")
+    
+
 def handle_client(connection, store, lock):
     with connection:
         buffer = b""
@@ -92,253 +349,6 @@ def handle_client(connection, store, lock):
                 if in_multi and cmd not in (b"EXEC", b"MULTI", b"DISCARD"):
                     queue.append(parts)
                     connection.sendall(b"+QUEUED\r\n")
-                    continue
-                if cmd == b"PING":
-                    connection.sendall(b"+PONG\r\n")
-                elif cmd == b"ECHO" and len(parts) >= 2:
-                    connection.sendall(encode_bulk(parts[1]))
-                elif cmd == b"SET" and len(parts) >= 3:
-                    key = parts[1]
-                    value = parts[2]
-                    expiry = None
-                    i = 3
-                    while i < len(parts):
-                        opt = parts[i].upper()
-                        if opt in (b"PX", b"EX") and i + 1 < len(parts):
-                            amount = int(parts[i + 1])
-                            if opt == b"PX":
-                                expiry = time.time() + amount / 1000.0
-                            else:
-                                expiry = time.time() + amount
-                            i += 2
-                        else:
-                            i += 1
-                    with lock:
-                        store[key] = (value, expiry)
-                    connection.sendall(b"+OK\r\n")
-                elif cmd == b"GET" and len(parts) >= 2:
-                    key = parts[1]
-                    with lock:
-                        entry = store.get(key)
-                        if entry is not None:
-                            value, expiry = entry
-                            if expiry is not None and time.time() >= expiry:
-                                del store[key]
-                                entry = None
-                    if entry is not None:
-                        connection.sendall(encode_bulk(entry[0]))
-                    else:
-                        connection.sendall(b"$-1\r\n")
-                elif cmd in (b"RPUSH", b"LPUSH") and len(parts) >= 3:
-                    key = parts[1]
-                    with lock:
-                        entry = store.get(key)
-                        if entry is not None and entry[0] == b"list":
-                            lst = entry[1]
-                            expiry = entry[2]
-                        else:
-                            lst = []
-                            expiry = None
-                        if cmd == b"RPUSH":
-                            lst.extend(parts[2:])
-                        else:
-                            lst[0:0] = parts[2:][::-1]
-                        store[key] = (b"list", lst, expiry)
-                        count = len(lst)
-                        q = waiters.get(key)
-                        while q and lst:
-                            ev, slot = q.popleft()
-                            slot.append(lst.pop(0))
-                            ev.set()
-                    connection.sendall(b":" + str(count).encode() + b"\r\n")
-                elif cmd == b"LRANGE" and len(parts) >= 4:
-                    key = parts[1]
-                    start = int(parts[2])
-                    stop = int(parts[3])
-                    with lock:
-                        entry = store.get(key)
-                        if entry is not None and entry[0] == b"list":
-                            lst = entry[1]
-                            n = len(lst)
-                            s = start + n if start < 0 else start
-                            e = stop + n if stop < 0 else stop
-                            s = max(s, 0)
-                            e = max(e, -1)
-                            items = lst[s:e + 1]
-                        else:
-                            items = []
-                    connection.sendall(encode_array(items))
-                elif cmd == b"LLEN" and len(parts) >= 2:
-                    with lock:
-                        entry = store.get(parts[1])
-                        n = len(entry[1]) if entry is not None and entry[0] == b"list" else 0
-                    connection.sendall(b":" + str(n).encode() + b"\r\n")
-                elif cmd == b"LPOP" and len(parts) >= 2:
-                    count = int(parts[2]) if len(parts) >= 3 else None
-                    with lock:
-                        entry = store.get(parts[1])
-                        lst = entry[1] if entry is not None and entry[0] == b"list" else None
-                        if lst and count is None:
-                            item = lst.pop(0)
-                        elif lst and count is not None:
-                            item = lst[:count]
-                            del lst[:count]
-                        else:
-                            item = None
-                    if item is None:
-                        connection.sendall(b"$-1\r\n")
-                    elif count is None:
-                        connection.sendall(encode_bulk(item))
-                    else:
-                        connection.sendall(encode_array(item))
-                elif cmd == b"BLPOP" and len(parts) >= 3:
-                    key = parts[1]
-                    timeout = float(parts[-1])
-                    ev = threading.Event()
-                    slot = []
-                    with lock:
-                        entry = store.get(key)
-                        if entry is not None and entry[0] == b"list" and entry[1]:
-                            slot.append(entry[1].pop(0))
-                        else:
-                            waiters.setdefault(key, deque()).append((ev, slot))
-                    if not slot:
-                        ev.wait(timeout if timeout > 0 else None)
-                    with lock:
-                        if not slot:
-                            q = waiters.get(key)
-                            if q and (ev, slot) in q:
-                                q.remove((ev, slot))
-                    if slot:
-                        connection.sendall(encode_array([key, slot[0]]))
-                    else:
-                        connection.sendall(b"*-1\r\n")
-                elif cmd == b"TYPE" and len(parts) >= 2:
-                    key = parts[1]
-                    with lock:
-                        entry = store.get(key)
-                        if entry is not None and len(entry) == 2:
-                            if entry[1] is not None and time.time() >= entry[1]:
-                                del store[key]
-                                t = b"none"
-                            else:
-                                t = b"string"
-                        elif entry is not None:
-                            t = entry[0]
-                        else:
-                            t = b"none"
-                    connection.sendall(b"+" + t + b"\r\n")
-                elif cmd == b"XADD" and len(parts) >= 5:
-                    key = parts[1]
-                    entry_id = parts[2]
-                    fields = parts[3:]
-                    err = None
-                    with lock:
-                        entry = store.get(key)
-                        if entry is not None and entry[0] == b"stream":
-                            entries = entry[1]
-                        else:
-                            entries = []
-                        if entry_id == b"*":
-                            entry_id = str(int(time.time() * 1000)).encode() + b"-*"
-                        ms_part, seq_part = entry_id.split(b"-")
-                        ms = int(ms_part)
-                        if seq_part == b"*":
-                            last = entries[-1][0].split(b"-") if entries else None
-                            if last and int(last[0]) == ms:
-                                seq = int(last[1]) + 1
-                            else:
-                                seq = 1 if ms == 0 else 0
-                            entry_id = str(ms).encode() + b"-" + str(seq).encode()
-                        else:
-                            seq = int(seq_part)
-                        if (ms, seq) <= (0, 0):
-                            err = b"-ERR The ID specified in XADD must be greater than 0-0\r\n"
-                        elif entries:
-                            lms, lseq = (int(x) for x in entries[-1][0].split(b"-"))
-                            if (ms, seq) <= (lms, lseq):
-                                err = b"-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n"
-                        if err is None:
-                            entries.append((entry_id, fields))
-                            store[key] = (b"stream", entries, None)
-                    if err:
-                        connection.sendall(err)
-                    else:
-                        with stream_cv:
-                            stream_cv.notify_all()
-                        connection.sendall(encode_bulk(entry_id))
-                elif cmd == b"XRANGE" and len(parts) >= 4:
-                    start = parse_range_id(parts[2], 0)
-                    end = parse_range_id(parts[3], float("inf"))
-                    with lock:
-                        entry = store.get(parts[1])
-                        entries = entry[1] if entry is not None and entry[0] == b"stream" else []
-                        result = [
-                            (eid, f) for eid, f in entries
-                            if start <= tuple(int(x) for x in eid.split(b"-")) <= end
-                        ]
-                    connection.sendall(encode_entries(result))
-                elif cmd == b"XREAD":
-                    upper = [p.upper() for p in parts]
-                    block = int(parts[upper.index(b"BLOCK") + 1]) if b"BLOCK" in upper else None
-                    rest = parts[upper.index(b"STREAMS") + 1:]
-                    half = len(rest) // 2
-                    keys, ids = rest[:half], rest[half:]
-                    with lock:
-                        resolved = []
-                        for k, i in zip(keys, ids):
-                            if i == b"$":
-                                entry = store.get(k)
-                                if entry is not None and entry[0] == b"stream" and entry[1]:
-                                    i = entry[1][-1][0]
-                                else:
-                                    i = b"0-0"
-                            resolved.append(i)
-                        ids = resolved
-                    if block is None:
-                        out = read_streams(store, lock, keys, ids)
-                    else:
-                        deadline = time.time() + block / 1000.0
-                        with stream_cv:
-                            out = read_streams(store, lock, keys, ids)
-                            while not out:
-                                if block == 0:
-                                    stream_cv.wait()
-                                else:
-                                    remaining = deadline - time.time()
-                                    if remaining <= 0:
-                                        break
-                                    stream_cv.wait(remaining)
-                                out = read_streams(store, lock, keys, ids)
-                    if not out and block is not None:
-                        connection.sendall(b"*-1\r\n")
-                    else:
-                        body = b"*" + str(len(out)).encode() + b"\r\n"
-                        for k, res in out:
-                            body += b"*2\r\n" + encode_bulk(k) + encode_entries(res)
-                        connection.sendall(body)
-                elif cmd == b"INCR" and len(parts) >= 2:
-                    key = parts[1]
-                    err = False
-                    with lock:
-                        entry = store.get(key)
-                        if entry is not None and len(entry) == 2 and entry[1] is not None and time.time() >= entry[1]:
-                            entry = None
-                        if entry is None:
-                            n = 1
-                            expiry = None
-                        else:
-                            try:
-                                n = int(entry[0]) + 1
-                                expiry = entry[1]
-                            except ValueError:
-                                err = True
-                        if not err:
-                            store[key] = (str(n).encode(), expiry)
-                    if err:
-                        connection.sendall(b"-ERR value is not an integer or out of range\r\n")
-                    else:
-                        connection.sendall(b":" + str(n).encode() + b"\r\n")
                 elif cmd == b"MULTI":
                     in_multi = True
                     queue = []
@@ -348,7 +358,15 @@ def handle_client(connection, store, lock):
                         connection.sendall(b"-ERR EXEC without MULTI\r\n")
                     else:
                         in_multi = False
-                        connection.sendall(b"*0\r\n")
+                        out = b"*" + str(len(queue)).encode() + b"\r\n"
+                        for q in queue:
+                            cap = Capture()
+                            execute(q, cap, store, lock)
+                            out += cap.data
+                        queue = []
+                        connection.sendall(out)
+                else:
+                    execute(parts, connection, store, lock)
                     
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

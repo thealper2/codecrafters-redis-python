@@ -2,6 +2,7 @@ import socket  # noqa: F401
 import threading
 import time
 from collections import deque
+import sys
 
 def parse_resp(data):
     if not data or data[0:1] != b"*":
@@ -401,7 +402,10 @@ def handle_client(connection, store, lock):
                     execute(parts, connection, store, lock)
                     
 def main():
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
+    porrt = 6379
+    if "--port" in sys.argv:
+        port = int(sys.argv[sys.argv.index("--port") + 1])
+    server_socket = socket.create_server(("localhost", port), reuse_port=True)
     store = {}
     lock = threading.Lock()
     while True:

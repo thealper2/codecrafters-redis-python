@@ -35,7 +35,22 @@ def encode_bulk(s):
 def encode_array(items):
     return b"*" + str(len(items)).encode() + b"\r\n" + b"".join(encode_bulk(x) for x in items)
 
+
 waiters = {}
+
+
+def parse_range_id(s, default_seq):
+    if b"-" in s:
+        a, b = s.split(b"-")
+        return int(a), int(b)
+    return int(s), default_seq
+
+
+def encode_entries(entries):
+    out = b"*" + str(len(entries)).encode() + b"\r\n"
+    for eid, fields in entries:
+        out += b"*2\r\n" + encode_bulk(eid) + encode_array(fields)
+    return out
 
 
 def handle_client(connection, store, lock):
@@ -225,6 +240,17 @@ def handle_client(connection, store, lock):
                         connection.sendall(err)
                     else:
                         connection.sendall(encode_bulk(entry_id))
+                elif cmd == b"XRANGE" and len(parts) >= 4:
+                    start = parse_range_id(parts[2], 0)
+                    end = parse_range_id(parts[3], float("inf"))
+                    with lock:
+                        entry = store.get(parts[1])
+                        entries = entry[1] if entry is not None and entry[0] == b"stream" else []
+                        result = [
+                            (eid, f) for eid, f in entries
+                            if start <= tuple(int(x) for x in eid.split(b"-")) <= end
+                        ]
+                    connection.sendall(encode_entries(result))
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

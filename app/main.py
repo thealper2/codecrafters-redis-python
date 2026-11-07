@@ -409,6 +409,10 @@ def main():
     port = 6379
     if "--port" in sys.argv:
         port = int(sys.argv[sys.argv.index("--port") + 1])
+    if "--replicaof" in sys.argv:
+        host, mport = sys.argv[sys.argv.index("--replicaof") + 1].split()
+        config["role"] = "slave"
+        config["master"] = (host, int(mport))
     server_socket = socket.create_server(("localhost", port), reuse_port=True)
     store = {}
     lock = threading.Lock()

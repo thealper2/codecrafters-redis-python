@@ -384,6 +384,7 @@ def handle_client(connection, store, lock):
                     else:
                         in_multi = False
                         queue = []
+                        watched = {}
                         connection.sendall(b"+OK\r\n")
                 elif cmd == b"WATCH":
                     if in_multi:

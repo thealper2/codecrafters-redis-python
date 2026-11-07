@@ -120,6 +120,11 @@ def handle_client(connection, store, lock):
                         else:
                             items = []
                     connection.sendall(encode_array(items))
+                elif cmd == b"LLEN" and len(parts) >= 2:
+                    with lock:
+                        entry = store.get(parts[1])
+                        n = len(entry[1]) if entry is not None and entry[0] == b"list" else 0
+                    connection.sendall(b":" + str(n).encode() + b"\r\n")
     
 
 def main():

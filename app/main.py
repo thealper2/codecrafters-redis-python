@@ -76,6 +76,7 @@ def handle_client(connection, store, lock):
     with connection:
         buffer = b""
         in_multi = False
+        queue = []
         while True:
             data = connection.recv(1024)
             if not data:
@@ -88,6 +89,10 @@ def handle_client(connection, store, lock):
                 parts, consumed = result
                 buffer = buffer[consumed:]
                 cmd = parts[0].upper()
+                if in_multi and cmd not in (b"EXEC", b"MULTI", b"DISCARD"):
+                    queue.append(parts)
+                    connection.sendall(b"+QUEUED\r\n")
+                    continue
                 if cmd == b"PING":
                     connection.sendall(b"+PONG\r\n")
                 elif cmd == b"ECHO" and len(parts) >= 2:
@@ -336,6 +341,7 @@ def handle_client(connection, store, lock):
                         connection.sendall(b":" + str(n).encode() + b"\r\n")
                 elif cmd == b"MULTI":
                     in_multi = True
+                    queue = []
                     connection.sendall(b"+OK\r\n")
                 elif cmd == b"EXEC":
                     if not in_multi:

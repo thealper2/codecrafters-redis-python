@@ -125,7 +125,17 @@ def handle_client(connection, store, lock):
                         entry = store.get(parts[1])
                         n = len(entry[1]) if entry is not None and entry[0] == b"list" else 0
                     connection.sendall(b":" + str(n).encode() + b"\r\n")
-    
+                elif cmd == b"LPOP" and len(parts) >= 2:
+                    with lock:
+                        entry = store.get(parts[1])
+                        if entry is not None and entry[0] == b"list" and entry[1]:
+                            item = entry[1].pop(0)
+                        else:
+                            item = None
+                    if item is not None:
+                        connection.sendall(encode_bulk(item))
+                    else:
+                        connection.sendall(b"$-1\r\n")
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

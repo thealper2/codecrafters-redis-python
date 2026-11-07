@@ -37,6 +37,7 @@ def encode_array(items):
 
 
 waiters = {}
+WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD")
 stream_cv = threading.Condition()
 
 def read_streams(store, lock, keys, ids):
@@ -81,6 +82,9 @@ class Capture:
 
 def execute(parts, connection, store, lock):
     cmd = parts[0].upper()
+    if cmd in WRITE_CMDS and len(parts) >= 2:
+        with lock:
+            versions[parts[1]] = versions.get(parts[1], 0) + 1
     if cmd == b"PING":
         connection.sendall(b"+PONG\r\n")
     elif cmd == b"ECHO" and len(parts) >= 2:
@@ -334,7 +338,7 @@ def handle_client(connection, store, lock):
         buffer = b""
         in_multi = False
         queue = []
-        watched = set()
+        watched = {}
         while True:
             data = connection.recv(1024)
             if not data:
@@ -359,13 +363,20 @@ def handle_client(connection, store, lock):
                         connection.sendall(b"-ERR EXEC without MULTI\r\n")
                     else:
                         in_multi = False
-                        out = b"*" + str(len(queue)).encode() + b"\r\n"
-                        for q in queue:
-                            cap = Capture()
-                            execute(q, cap, store, lock)
-                            out += cap.data
-                        queue = []
-                        connection.sendall(out)
+                        with lock:
+                            dirty = any(versions.get(k, 0) != v for k, v in watched.items())
+                        watched = {}
+                        if dirty:
+                            queue = []
+                            connection.sendall(b"*-1\r\n")
+                        else:
+                            out = b"*" + str(len(queue)).encode() + b"\r\n"
+                            for q in queue:
+                                cap = Capture()
+                                execute(q, cap, store, lock)
+                                out += cap.data
+                            queue = []
+                            connection.sendall(out)
                 elif cmd == b"DISCARD":
                     if not in_multi:
                         connection.sendall(b"-ERR DISCARD without MULTI\r\n")
@@ -377,7 +388,9 @@ def handle_client(connection, store, lock):
                     if in_multi:
                         connection.sendall(b"-ERR WATCH inside MULTI is not allowed\r\n")
                     else:
-                        watched.update(parts[1:])
+                        with lock:
+                            for k in parts[1:]:
+                                watched[k] = versions.get(k, 0)
                         connection.sendall(b"+OK\r\n")
                 else:
                     execute(parts, connection, store, lock)

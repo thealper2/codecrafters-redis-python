@@ -205,7 +205,7 @@ def handle_client(connection, store, lock):
                         elif entries:
                             lms, lseq = (int(x) for x in entries[-1][0].split(b"-"))
                             if (ms, seq) <= (lms, lseq):
-                                err = b"-ERR The ID specified in XADD is equal or smaller than the target stream top item \r\n"
+                                err = b"-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n"
                         if err is None:
                             entries.append((entry_id, fields))
                             store[key] = (b"stream", entries, None)

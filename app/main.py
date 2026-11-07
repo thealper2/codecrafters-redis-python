@@ -255,6 +255,27 @@ def handle_client(connection, store, lock):
                             if start <= tuple(int(x) for x in eid.split(b"-")) <= end
                         ]
                     connection.sendall(encode_entries(result))
+                elif cmd == b"XREAD":
+                    idx = [p.upper() for p in parts].index(b"STREAMS")
+                    rest = parts[idx + 1:]
+                    half = len(rest) // 2
+                    keys, ids = rest[:half], rest[half:]
+                    out = []
+                    with lock:
+                        for k, i in zip(keys, ids):
+                            after = parse_range_id(i, 0)
+                            entry = store.get(k)
+                            entries = entry[1] if entry is not None and entry[0] == b"stream" else []
+                            res = [
+                                (eid, f) for eid, f in entries
+                                if tuple(int(x) for x in eid.split(b"-")) > after
+                            ]
+                            if res:
+                                out.append((k, res))
+                    body = b"*" + str(len(out)).encode() + b"\r\n"
+                    for k, res in out:
+                        body += b"*2\r\n" + encode_bulk(k) + encode_entries(res)
+                    connection.sendall(body)
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

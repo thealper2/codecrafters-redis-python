@@ -95,7 +95,7 @@ def handle_client(connection, store, lock):
                         lst.extend(parts[2:])
                         store[key] = (b"list", lst, expiry)
                         count = len(lst)
-                    connection.sendall(b":" + str(count).encode() + "b\r\n")
+                    connection.sendall(b":" + str(count).encode() + b"\r\n")
     
 
 def main():

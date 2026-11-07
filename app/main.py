@@ -1,6 +1,7 @@
 import socket  # noqa: F401
 import threading
 import time
+from collections import deque
 
 def parse_resp(data):
     if not data or data[0:1] != b"*":
@@ -33,6 +34,8 @@ def encode_bulk(s):
 
 def encode_array(items):
     return b"*" + str(len(items)).encode() + b"\r\n" + b"".join(encode_bulk(x) for x in items)
+
+waiters = {}
 
 
 def handle_client(connection, store, lock):
@@ -102,6 +105,11 @@ def handle_client(connection, store, lock):
                             lst[0:0] = parts[2:][::-1]
                         store[key] = (b"list", lst, expiry)
                         count = len(lst)
+                        q = waiters.get(key)
+                        while q and lst:
+                            ev, slot = q.popleft()
+                            slot.append(lst.pop(0))
+                            ev.set()
                     connection.sendall(b":" + str(count).encode() + b"\r\n")
                 elif cmd == b"LRANGE" and len(parts) >= 4:
                     key = parts[1]
@@ -143,6 +151,28 @@ def handle_client(connection, store, lock):
                         connection.sendall(encode_bulk(item))
                     else:
                         connection.sendall(encode_array(item))
+                elif cmd == b"BLPOP" and len(parts) >= 3:
+                    key = parts[1]
+                    timeout = float(parts[-1])
+                    ev = threading.Event()
+                    slot = []
+                    with lock:
+                        entry = store.get(key)
+                        if entry is not None and entry[0] == b"list" and entry[1]:
+                            slot.append(entry[1].pop(0))
+                        else:
+                            waiters.setdefault(key, deque()).append((ev, slot))
+                    if not slot:
+                        ev.wait(timeout if timeout > 0 else None)
+                    with lock:
+                        if not slot:
+                            q = waiters.get(key)
+                            if q and (ev, slot) in q:
+                                q.remove((ev, slot))
+                    if slot:
+                        connection.sendall(encode_array([key, slot[0]]))
+                    else:
+                        connection.sendall(b"*-1\r\n")
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

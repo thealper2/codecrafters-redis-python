@@ -188,6 +188,19 @@ def handle_client(connection, store, lock):
                         else:
                             t = b"none"
                     connection.sendall(b"+" + t + b"\r\n")
+                elif cmd == b"XADD" and len(parts) >= 5:
+                    key = parts[1]
+                    entry_id = parts[2]
+                    fields = parts[3:]
+                    with lock:
+                        entry = store.get(key)
+                        if entry is not None and entry[0] == b"stream":
+                            entries = entry[1]
+                        else:
+                            entries = []
+                        entries.append((entry_id, fields))
+                        store[key] = (b"stream", entries, None)
+                    connection.sendall(encode_bulk(entry_id))
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

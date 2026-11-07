@@ -82,6 +82,20 @@ def handle_client(connection, store, lock):
                         connection.sendall(encode_bulk(entry[0]))
                     else:
                         connection.sendall(b"$-1\r\n")
+                elif cmd == b"RPUSH" and len(parts) >= 3:
+                    key = parts[1]
+                    with lock:
+                        entry = store.get(key)
+                        if entry is not None and entry[0] == b"list":
+                            lst = entry[1]
+                            expiry = entry[2]
+                        else:
+                            lst = []
+                            expiry = None
+                        lst.extend(parts[2:])
+                        store[key] = (b"list", lst, expiry)
+                        count = len(lst)
+                    connection.sendall(b":" + str(count).encode() + "b\r\n")
     
 
 def main():

@@ -126,16 +126,23 @@ def handle_client(connection, store, lock):
                         n = len(entry[1]) if entry is not None and entry[0] == b"list" else 0
                     connection.sendall(b":" + str(n).encode() + b"\r\n")
                 elif cmd == b"LPOP" and len(parts) >= 2:
+                    count = int(parts[2]) if len(parts) >= 3 else None
                     with lock:
                         entry = store.get(parts[1])
-                        if entry is not None and entry[0] == b"list" and entry[1]:
-                            item = entry[1].pop(0)
+                        lst = entry[1] if entry is not None and entry[0] == b"list" else None
+                        if lst and count is None:
+                            item = lst.pop(0)
+                        elif lst and count is not None:
+                            item = lst[:count]
+                            del lst[:count]
                         else:
                             item = None
-                    if item is not None:
+                    if item is None:
+                        connection.sendall(b"$-1\r\n")
+                    elif count is None:
                         connection.sendall(encode_bulk(item))
                     else:
-                        connection.sendall(b"$-1\r\n")
+                        connection.sendall(encode_array(item))
 
 def main():
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)

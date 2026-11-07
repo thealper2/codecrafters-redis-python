@@ -38,6 +38,7 @@ def encode_array(items):
 
 
 waiters = {}
+config = {"role": "master"}
 versions = {}
 WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD")
 stream_cv = threading.Condition()
@@ -333,6 +334,9 @@ def execute(parts, connection, store, lock):
             connection.sendall(b"-ERR value is not an integer or out of range\r\n")
         else:
             connection.sendall(b":" + str(n).encode() + b"\r\n")
+    elif cmd == b"INFO":
+        info = "role:" + config["role"]
+        connection.sendall(encode_bulk(info.encode()))
     
 
 def handle_client(connection, store, lock):

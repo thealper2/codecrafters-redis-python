@@ -334,6 +334,7 @@ def handle_client(connection, store, lock):
         buffer = b""
         in_multi = False
         queue = []
+        watched = set()
         while True:
             data = connection.recv(1024)
             if not data:
@@ -346,7 +347,7 @@ def handle_client(connection, store, lock):
                 parts, consumed = result
                 buffer = buffer[consumed:]
                 cmd = parts[0].upper()
-                if in_multi and cmd not in (b"EXEC", b"MULTI", b"DISCARD"):
+                if in_multi and cmd not in (b"EXEC", b"MULTI", b"DISCARD", b"WATCH"):
                     queue.append(parts)
                     connection.sendall(b"+QUEUED\r\n")
                 elif cmd == b"MULTI":
@@ -373,7 +374,11 @@ def handle_client(connection, store, lock):
                         queue = []
                         connection.sendall(b"+OK\r\n")
                 elif cmd == b"WATCH":
-                    connection.sendall(b"+OK\r\n")
+                    if in_multi:
+                        connection.sendall(b"-ERR WATCH inside MULTI is not allowed\r\n")
+                    else:
+                        watched.update(parts[1:])
+                        connection.sendall(b"+OK\r\n")
                 else:
                     execute(parts, connection, store, lock)
                     

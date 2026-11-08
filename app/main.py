@@ -512,6 +512,11 @@ def execute(parts, connection, store, lock):
         s = max(start + n if start < 0 else start, 0)
         e = max(stop + n if stop < 0 else stop, -1)
         connection.sendall(encode_array(members[s:e + 1]))
+    elif cmd == b"ZCARD" and len(parts) >= 2:
+        with lock:
+            entry = store.get(parts[1])
+            n = len(entry[1]) if entry is not None and entry[0] == b"zset" else 0
+        connection.sendall(b":" + str(n).encode() + b"\r\n")
 
 def handle_master(conn, store, lock):
     buffer = b""

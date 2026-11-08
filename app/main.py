@@ -362,6 +362,7 @@ def handle_master(conn, store, lock):
     while b"\r\n" not in buffer:
         buffer += conn.recv(1024)
     buffer = buffer[buffer.find(b"\r\n") + 2:]
+    offset = 0
     while True:
         if buffer.startswith(b"$") and b"\r\n" in buffer:
             end = buffer.find(b"\r\n")
@@ -377,7 +378,11 @@ def handle_master(conn, store, lock):
                 break
             parts, consumed = result
             buffer = buffer[consumed:]
-            execute(parts, Capture(), store, lock)
+            if parts[0].upper() == b"REPLCONF" and len(parts) >= 2 and parts[1].upper() == b"GETACK":
+                conn.sendall(encode_array([b"REPLCONF", b"ACK", str(offset).encode()]))
+            else:
+                execute(parts, Capture(), store, lock)
+            offset += consumed
         data = conn.recv(1024)
         if not data:
             break

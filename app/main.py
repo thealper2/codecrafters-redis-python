@@ -57,6 +57,7 @@ EMPTY_RDB = bytes.fromhex(
 )
 versions = {}
 replicas = []
+channels = {}
 acks = {}
 ack_cv = threading.Condition()
 WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD")
@@ -506,6 +507,7 @@ def handle_client(connection, store, lock):
         in_multi = False
         queue = []
         watched = {}
+        subs = set()
         while True:
             data = connection.recv(1024)
             if not data:
@@ -563,6 +565,15 @@ def handle_client(connection, store, lock):
                 elif cmd == b"UNWATCH":
                     watched = {}
                     connection.sendall(b"+OK\r\n")
+                elif cmd == b"SUBSCRIBE":
+                    for ch in parts[1:]:
+                        subs.add(ch)
+                        with lock:
+                            channels.setdefault(ch, set()).add(connection)
+                        connection.sendall(
+                            b"*3\r\n" + encode_bulk(b"subscribe") + encode_bulk(ch)
+                            + b":" + str(len(subs)).encode() + b"\r\n"
+                        )
                 else:
                     execute(parts, connection, store, lock)
                     

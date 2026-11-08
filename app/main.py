@@ -698,6 +698,18 @@ def execute(parts, connection, store, lock):
         else:
             d = geo_dist(*geo_decode(s1), *geo_decode(s2))
             connection.sendall(encode_bulk(("%.4f" % d).encode()))
+    elif cmd == b"GEOSEARCH":
+        upper = [p.upper() for p in parts]
+        i = upper.index(b"FROMLONLAT")
+        lon, lat = float(parts[i + 1], float(parts[i + 2])
+        j = upper.index(b"BYRADIUS")
+        unit = {b"M": 1.0, b"KM": 1000.0, b"MI": 1609.34, b"FT": 0.3048}[upper[j + 2]]
+        radius = float(parts[j + 1]) * unit
+        with lock:
+            entry = store.get(parts[1])
+            zset = dict(entry[1]) if entry is not None and entry[0] == b"zset" else {}
+        result = [m for m, s in zset.items() if geo_dist(lon, lat, *geo_decode(s)) <= radius]
+        connection.sendall(encode_array(result))
 
 def handle_master(conn, store, lock):
     buffer = b""

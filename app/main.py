@@ -701,7 +701,7 @@ def execute(parts, connection, store, lock):
     elif cmd == b"GEOSEARCH":
         upper = [p.upper() for p in parts]
         i = upper.index(b"FROMLONLAT")
-        lon, lat = float(parts[i + 1], float(parts[i + 2])
+        lon, lat = float(parts[i + 1]), float(parts[i + 2])
         j = upper.index(b"BYRADIUS")
         unit = {b"M": 1.0, b"KM": 1000.0, b"MI": 1609.34, b"FT": 0.3048}[upper[j + 2]]
         radius = float(parts[j + 1]) * unit

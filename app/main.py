@@ -343,6 +343,8 @@ def execute(parts, connection, store, lock):
         connection.sendall(encode_bulk(info.encode()))
     elif cmd == b"REPLCONF":
         connection.sendall(b"+OK\r\n")
+    elif cmd == b"PSYNC":
+        connection.sendall(b"+FULLRESYNC " + config["replid"].encode() + b" 0\r\n")
     
 
 def handle_client(connection, store, lock):

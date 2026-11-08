@@ -752,7 +752,7 @@ def handle_client(connection, store, lock):
         queue = []
         watched = {}
         subs = set()
-        user = b"default"
+        user = b"default" if b"nopass" in users[b"default"]["flags"] else None
         while True:
             data = connection.recv(1024)
             if not data:
@@ -765,7 +765,9 @@ def handle_client(connection, store, lock):
                 parts, consumed = result
                 buffer = buffer[consumed:]
                 cmd = parts[0].upper()
-                if subs and cmd not in (b"SUBSCRIBE", b"UNSUBSCRIBE", b"PUNSUBSCRIBE", b"PING", b"QUIT", b"RESET"):
+                if user is None and cmd != b"AUTH":
+                    connection.sendall(b"-NOAUTH Authentication required.\r\n")
+                elif subs and cmd not in (b"SUBSCRIBE", b"UNSUBSCRIBE", b"PUNSUBSCRIBE", b"PING", b"QUIT", b"RESET"):
                     connection.sendall(
                         b"-ERR Can't execute '" + parts[0].lower()
                         + b"': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context\r\n"

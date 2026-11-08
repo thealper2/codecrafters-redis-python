@@ -517,6 +517,16 @@ def execute(parts, connection, store, lock):
             entry = store.get(parts[1])
             n = len(entry[1]) if entry is not None and entry[0] == b"zset" else 0
         connection.sendall(b":" + str(n).encode() + b"\r\n")
+    elif cmd == b"ZSCORE" and len(parts) >= 3:
+        with lock:
+            entry = store.get(parts[1])
+            zset = entry[1] if entry is not None and entry[0] == b"zset" else {}
+            score = zset.get(parts[2])
+        if score in None:
+            connection.sendall(b"$-1\r\n")
+        else:
+            s = str(int(score)) if score.is_integer() else repr(score)
+            connection.sendall(encode_bulk(s.encode()))
 
 def handle_master(conn, store, lock):
     buffer = b""

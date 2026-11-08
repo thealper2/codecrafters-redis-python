@@ -522,7 +522,7 @@ def execute(parts, connection, store, lock):
             entry = store.get(parts[1])
             zset = entry[1] if entry is not None and entry[0] == b"zset" else {}
             score = zset.get(parts[2])
-        if score in None:
+        if score is None:
             connection.sendall(b"$-1\r\n")
         else:
             s = str(int(score)) if score.is_integer() else repr(score)

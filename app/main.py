@@ -5,6 +5,7 @@ from collections import deque
 import sys
 import os
 import math
+import hashlib
 
 def parse_resp(data):
     if not data or data[0:1] != b"*":
@@ -845,6 +846,20 @@ def handle_client(connection, store, lock):
                             b"*4\r\n" + encode_bulk(b"flags") + encode_array(u["flags"])
                             + encode_bulk(b"passwords") + encode_array(u["passwords"])
                         )
+                elif cmd == b"ACL" and len(parts) >= 3 and parts[1].upper() == b"SETUSER":
+                    u = users.setdefault(parts[2], {"flags": [], "passwords": []})
+                    for rule in parts[3:]:
+                        if rule.startswith(b">"):
+                            h = hashlib.sha256(rule[1:]).hexdigest().encode()
+                            if h not in u["passwords"]:
+                                u["passwords"].append(h)
+                            if b"nopass" in u["flags"]:
+                                u["flags"].remove(b"nopass")
+                        elif rule == b"nopass":
+                            u["passwords"] = []
+                            if b"nopass" not in u["flags"]:
+                                u["flags"].append(b"nopass")
+                    connection.sendall(b"+OK\r\n")
                 else:
                     execute(parts, connection, store, lock)
                     

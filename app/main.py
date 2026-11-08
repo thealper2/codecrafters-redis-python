@@ -573,7 +573,7 @@ def main():
             aof_dir = os.path.join(config["dir"], config["appenddirname"])
             os.makedirs(aof_dir, exist_ok=True)
             config["aof_path"] = os.path.join(aof_dir, config["appendfilename"] + ".1.incr.aof")
-            open(config["aof_path"], "ab").close(
+            open(config["aof_path"], "ab").close()
             manifest = os.path.join(aof_dir, config["appendfilename"] + ".manifest")
             if not os.path.exists(manifest):
                 with open(manifest, "w") as f:

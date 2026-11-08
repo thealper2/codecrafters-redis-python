@@ -3,6 +3,7 @@ import threading
 import time
 from collections import deque
 import sys
+import os
 
 def parse_resp(data):
     if not data or data[0:1] != b"*":
@@ -75,6 +76,63 @@ def parse_range_id(s, default_seq):
         a, b = s.split(b"-")
         return int(a), int(b)
     return int(s), default_seq
+
+
+def read_length(data, i):
+    b = data[i]
+    t = b >> 6
+    if t == 0:
+        return b & 0x3F, i + 1, False
+    if t == 1:
+        return ((b & 0x3F) << 8) | data[i + 1], i + 2, False
+    if t == 2:
+        if b == 0x80:
+            return int.from_bytes(data[i + 1:i + 5], "big"), i + 5, False
+        return int.from_bytes(data[i + 1:i + 9], "big"), i + 9, False
+    return b & 0x3F, i + 1, True
+
+
+def read_string(data, i):
+    n, i, special = read_length(data, i)
+    if special:
+        size = {0: 1, 1: 2, 2: 4}[n]
+        return str(int.from_bytes(data[i:i + size], "little", signed=True)).encode(), i + size
+    return data[i:i + n], i + n
+
+
+def load_rdb(store):
+    path = os.path.join(config["dir"], config["dbfilename"])
+    if not config["dbfilename"] or not os.path.exists(path):
+        return
+    with open(path, "rb") as f:
+        data = f.read()
+    i = 9
+    expiry = None
+    while i < len(data):
+        op = data[i]
+        i += 1
+        if op == 0xFF:
+            break
+        elif op == 0xFA:
+            _, i = read_string(data, i)
+            _, i = read_string(data, i)
+        elif op == 0xFE:
+            _, i, _ = read_length(data, i)
+        elif op == 0xFB:
+            _, i, _ = read_length(data, i)
+            _, i, _ = read_length(data, i)
+        elif op == 0xFC:
+            expiry = int.from_bytes(data[i:i + 8], "little") / 1000.0
+            i += 8
+        elif op == 0xFD:
+            expiry = float(int.from_bytes(data[i:i + 4], "little"))
+            i += 4
+        else:
+            key, i = read_string(data, i)
+            value, i = read_string(data, i)
+            if expiry is None or expiry > time.time():
+                store[key] = (value, expiry)
+            expiry = None
 
 
 def encode_entries(entries):
@@ -388,6 +446,10 @@ def execute(parts, connection, store, lock):
     elif cmd == b"CONFIG" and len(parts) >= 3 and parts[1].upper() == b"GET":
         name = parts[2].decode()
         connection.sendall(encode_array([parts[2], str(config.get(name, "")).encode()]))
+    elif cmd == b"KEYS":
+        with lock:
+            keys = list(store.keys())
+        connection.sendall(encode_array(keys))
 
 
 def handle_master(conn, store, lock):
@@ -503,6 +565,7 @@ def main():
     server_socket = socket.create_server(("localhost", port), reuse_port=True)
     store = {}
     lock = threading.Lock()
+    load_rdb(store)
 
     if config["role"] == "slave":
         master_conn  = socket.create_connection(config["master"])

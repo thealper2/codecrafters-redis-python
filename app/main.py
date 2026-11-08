@@ -355,6 +355,8 @@ def execute(parts, connection, store, lock):
         connection.sendall(b"+FULLRESYNC " + config["replid"].encode() + b" 0\r\n")
         connection.sendall(b"$" + str(len(EMPTY_RDB)).encode() + b"\r\n" + EMPTY_RDB)
         replicas.append(connection)
+    elif cmd == b"WAIT":
+        connection.sendall(b":" + str(len(replicas)).encode() + b"\r\n")
 
 
 def handle_master(conn, store, lock):

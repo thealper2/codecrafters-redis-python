@@ -520,7 +520,14 @@ def handle_client(connection, store, lock):
                 parts, consumed = result
                 buffer = buffer[consumed:]
                 cmd = parts[0].upper()
-                if in_multi and cmd not in (b"EXEC", b"MULTI", b"DISCARD", b"WATCH"):
+                if subs and cmd not in (b"SUBSCRIBE", b"UNSUBSCRIBE", b"PUNSUBSCRIBE", b"PING", b"QUIT", b"RESET"):
+                    connection.sendall(
+                        b"-ERR Can't execute '" + parts[0].lower()
+                        + b"': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context\r\n"
+                    )
+                elif subs and cmd == b"PING":
+                    connection.sendall(encode_array([b"pong", b""]))
+                elif in_multi and cmd not in (b"EXEC", b"MULTI", b"DISCARD", b"WATCH"):
                     queue.append(parts)
                     connection.sendall(b"+QUEUED\r\n")
                 elif cmd == b"MULTI":

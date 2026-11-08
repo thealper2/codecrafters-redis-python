@@ -60,7 +60,7 @@ replicas = []
 channels = {}
 acks = {}
 ack_cv = threading.Condition()
-WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD", b"ZADD", b"ZREM")
+WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD", b"ZADD", b"ZREM", b"SETBIT")
 stream_cv = threading.Condition()
 
 def read_streams(store, lock, keys, ids):
@@ -537,6 +537,29 @@ def execute(parts, connection, store, lock):
                     del zset[m]
                     removed += 1
         connection.sendall(b":" + str(removed).encode() + b"\r\n")
+    elif cmd == b"SETBIT" and len(parts) >= 4:
+        key = parts[1]
+        offset = int(parts[2])
+        bit = int(parts[3])
+        with lock:
+            entry = store.get(key)
+            if entry is not None and len(entry) == 2:
+                buf = bytearray(entry[0])
+                expiry = entry[1]
+            else:
+                buf = bytearray()
+                expiry = None
+            byte_i, bit_i = divmod(offset, 8)
+            if len(buf) <= byte_i:
+                buf.extend(b"\x00" * (byte_i + 1 - len(buf)))
+            mask = 0x80 >> bit_i
+            old = 1 if buf[byte_i] & mask else 0
+            if bit:
+                buf[byte_i] |= mask
+            else:
+                buf[byte_i] &= ~mask & 0xFF
+            store[key] = (bytes(buf), expiry)
+        connection.sendall(b":" + str(old).encode() + b"\r\n")
 
 def handle_master(conn, store, lock):
     buffer = b""

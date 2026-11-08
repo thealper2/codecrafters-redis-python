@@ -60,7 +60,7 @@ replicas = []
 channels = {}
 acks = {}
 ack_cv = threading.Condition()
-WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD", b"ZADD")
+WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD", b"ZADD", b"ZREM")
 stream_cv = threading.Condition()
 
 def read_streams(store, lock, keys, ids):
@@ -527,6 +527,16 @@ def execute(parts, connection, store, lock):
         else:
             s = str(int(score)) if score.is_integer() else repr(score)
             connection.sendall(encode_bulk(s.encode()))
+    elif cmd == b"ZREM" and len(parts) >= 3:
+        with lock:
+            entry = store.get(parts[1])
+            zset = entry[1] if entry is not None and entry[0] == b"zset" else {}
+            removed = 0
+            for m in parts[2:]:
+                if m in zset:
+                    del zset[m]
+                    removed += 1
+        connection.sendall(b":" + str(removed).encode() + b"\r\n")
 
 def handle_master(conn, store, lock):
     buffer = b""

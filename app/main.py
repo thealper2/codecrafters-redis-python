@@ -168,6 +168,12 @@ def execute(parts, connection, store, lock):
             for r in replicas:
                 r.sendall(data)
             config["offset"] += len(data)
+            f = config.get("aof_file")
+            if f is not None:
+                f.write(data)
+                f.flush()
+                if config["appendfsync"] == "always":
+                    os.fsync(f.fileno())
     if cmd == b"PING":
         connection.sendall(b"+PONG\r\n")
     elif cmd == b"ECHO" and len(parts) >= 2:
@@ -574,7 +580,7 @@ def main():
             os.makedirs(aof_dir, exist_ok=True)
             manifest = os.path.join(aof_dir, config["appendfilename"] + ".manifest")
             aof_name = config["appendfilename"] + ".1.incr.aof"
-            if not os.path.exists(manifest):
+            if os.path.exists(manifest):
                 with open(manifest) as f:
                     for line in f:
                         tokens = line.split()

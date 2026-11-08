@@ -501,6 +501,17 @@ def execute(parts, connection, store, lock):
             connection.sendall(b"$-1\r\n")
         else:
             connection.sendall(b":" + str(rank).encode() + b"\r\n")
+    elif cmd == b"ZRANGE" and len(parts) >= 4:
+        start = int(parts[2])
+        stop = int(parts[3])
+        with lock:
+            entry = store.get(parts[1])
+            zset = entry[1] if entry is not None and entry[0] == b"zset" else {}
+            members = zsorted(zset)
+        n = len(members)
+        s = max(start + n if start < 0 else start, 0)
+        e = max(stop + n if stop < 0 else stop, -1)
+        connection.sendall(encode_array(members[s:e + 1]))
 
 def handle_master(conn, store, lock):
     buffer = b""

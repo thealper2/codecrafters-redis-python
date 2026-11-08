@@ -172,6 +172,24 @@ def geo_encode(lon, lat):
     return spread(lat_i) | (spread(lon_i) << 1)
 
 
+def compact(v):
+    r = 0
+    for i in range(26):
+        r |= ((v >> (2 * i)) & 1) << i
+    return r
+
+
+def geo_decode(score):
+    score = int(score)
+    lat_i = compact(score)
+    lon_i = compact(score >> 1)
+    lat_step = (MAX_LAT - MIN_LAT) / (1 << 26)
+    lon_step = (MAX_LON - MIN_LON) / (1 << 26)
+    lat = MIN_LAT + lat_step * (lat_i + 0.5)
+    lon = MIN_LON + lon_step * (lon_i + 0.5)
+    return lon, lat
+
+
 class Capture:
     def __init__(self):
         self.data = b""
@@ -646,6 +664,19 @@ def execute(parts, connection, store, lock):
                     zset[member] = float(geo_encode(lon, lat))
                 store[key] = (b"zset", zset, None)
             connection.sendall(b":" + str(added).encode() + b"\r\n")
+    elif cmd == b"GEOPOS" and len(parts) >= 3:
+        with lock:
+            entry = store.get(parts[1])
+            zset = entry[1] if entry is not None and entry[0] == b"zset" else {}
+            scores = [zset.get(m) for m in parts[2:]]
+        out = b"*" + str(len(scores)).encode() + b"\r\n"
+        for s in scores:
+            if s is None:
+                out += b"*-1\r\n"
+            else:
+                lon, lat = geo_decode(s)
+                out += encode_array([repr(lon).encode(), repr(lat).encode()])
+        connection.sendall(out)
 
 def handle_master(conn, store, lock):
     buffer = b""

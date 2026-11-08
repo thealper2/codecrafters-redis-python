@@ -568,6 +568,11 @@ def execute(parts, connection, store, lock):
         byte_i, bit_i = divmod(offset, 8)
         bit = 1 if byte_i < len(buf) and buf[byte_i] & (0x80 >> bit_i) else 0
         connection.sendall(b":" + str(bit).encode() + b"\r\n")
+    elif cmd == b"STRLEN" and len(parts) >= 2:
+        with lock:
+            entry = store.get(parts[1])
+            n = len(entry[0]) if entry is not None and len(entry) == 2 else 0
+        connection.sendall(b":" + str(n).encode() + b"\r\n")
 
 def handle_master(conn, store, lock):
     buffer = b""

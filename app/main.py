@@ -841,7 +841,10 @@ def handle_client(connection, store, lock):
                     if u is None:
                         connection.sendall(b"*-1\r\n")
                     else:
-                        connection.sendall(b"*2\r\n" + encode_bulk(b"flags") + encode_array(u["flags"]))
+                        connection.sendall(
+                            b"*4\r\n" + encode_bulk(b"flags") + encode_array(u["flags"])
+                            + encode_bulk(b"passwords") + encode_array(u["passwords"])
+                        )
                 else:
                     execute(parts, connection, store, lock)
                     

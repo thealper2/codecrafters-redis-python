@@ -355,6 +355,33 @@ def execute(parts, connection, store, lock):
         connection.sendall(b"+FULLRESYNC " + config["replid"].encode() + b" 0\r\n")
         connection.sendall(b"$" + str(len(EMPTY_RDB)).encode() + b"\r\n" + EMPTY_RDB)
         replicas.append(connection)
+
+
+def handle_master(conn, store, lock):
+    buffer = b""
+    while b"\r\n" not in buffer:
+        buffer += conn.recv(1024)
+    buffer = buffer[buffer.find(b"\r\n") + 2:]
+    while True:
+        if buffer.startswith(b"$") and b"\r\n" in buffer:
+            end = buffer.find(b"\r\n")
+            n = int(buffer[1:end])
+            if len(buffer) >= end + 2 + n:
+                buffer = buffer[end + 2 + n:]
+                break
+        buffer += conn.recv(1024)
+    while True:
+        while True:
+            result = parse_resp(buffer)
+            if result is None:
+                break
+            parts, consumed = result
+            buffer = buffer[consumed:]
+            execute(parts, Capture(), store, lock)
+        data = conn.recv(1024)
+        if not data:
+            break
+        buffer += data
     
 
 def handle_client(connection, store, lock):
@@ -436,6 +463,7 @@ def main():
     lock = threading.Lock()
     
     if config["role"] == "slave":
+        threading.Thread(target=handle_master, args=(config["master_conn"], store, lock), daemon=True).start()
         master_conn  = socket.create_connection(config["master"])
         master_conn.sendall(encode_array([b"PING"]))
         master_conn.recv(1024)

@@ -429,6 +429,7 @@ def main():
         master_conn.recv(1024)
         master_conn.sendall(encode_array([b"REPLCONF", b"capa", b"psync2"]))
         master_conn.recv(1024)
+        master_conn.sendall(encode_array([b"PSYNC", b"?", b"-1"]))
         config["master_conn"] = master_conn
     
     while True:

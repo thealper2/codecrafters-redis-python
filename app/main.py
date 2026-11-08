@@ -46,6 +46,8 @@ EMPTY_RDB = bytes.fromhex(
 )
 versions = {}
 replicas = []
+acks = {}
+ack_cv = threading.Condition()
 WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD")
 stream_cv = threading.Condition()
 
@@ -94,8 +96,10 @@ def execute(parts, connection, store, lock):
     if cmd in WRITE_CMDS and len(parts) >= 2:
         with lock:
             versions[parts[1]] = versions.get(parts[1], 0) + 1
+            data = encode_array(parts)
             for r in replicas:
-                r.sendall(encode_array(parts))
+                r.sendall(data)
+            config["offset"] += len(data)
     if cmd == b"PING":
         connection.sendall(b"+PONG\r\n")
     elif cmd == b"ECHO" and len(parts) >= 2:
@@ -350,12 +354,36 @@ def execute(parts, connection, store, lock):
         ])
         connection.sendall(encode_bulk(info.encode()))
     elif cmd == b"REPLCONF":
-        connection.sendall(b"+OK\r\n")
+        if len(parts) >= 3 and parts[1].upper() == b"ACK":
+            with ack_cv:
+                acks[connection] = int(parts[2])
+                ack_cv.notify_all()
+        else:
+            connection.sendall(b"+OK\r\n")
     elif cmd == b"PSYNC":
         connection.sendall(b"+FULLRESYNC " + config["replid"].encode() + b" 0\r\n")
         connection.sendall(b"$" + str(len(EMPTY_RDB)).encode() + b"\r\n" + EMPTY_RDB)
         replicas.append(connection)
     elif cmd == b"WAIT":
+        need = int(parts[1])
+        timeout = int(parts[2])
+        target = config["offset"]
+        if target == 0:
+            n = len(replicas)
+        else:
+            getack = encode_array([b"REPLCONF", b"GETACK", b"*"])
+            with lock:
+                for r in replicas:
+                    r.sendall(getack)
+                config["offset"] += len(getack)
+            deadline = time.time() + timeout / 1000.0
+            with ack_cv:
+                while True:
+                    n = sum(1 for v in acks.values() if v >= target)
+                    remaining = deadline - time.time()
+                    if n >= need or remaining <= 0:
+                        break
+                    ack_cv.wait(remaining)
         connection.sendall(b":" + str(len(replicas)).encode() + b"\r\n")
 
 

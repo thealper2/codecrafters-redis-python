@@ -153,7 +153,7 @@ def encode_entries(entries):
     return out
 
 
-def zsorted(set):
+def zsorted(zset):
     return sorted(zset, key=lambda m: (zset[m], m))
 
 

@@ -570,7 +570,10 @@ def main():
         config["master"] = (host, int(mport))
     for name in ("dir", "dbfilename", "appendonly", "appenddirname", "appendfilename", "appendfsync"):
         if config["appendonly"] == "yes":
-            os.makedirs(os.path.join(config["dir"], config["appenddirname"]), exist_ok=True)
+            aof_dir = os.path.join(config["dir"], config["appenddirname"])
+            os.makedirs(aof_dir, exist_ok=True)
+            config["aof_path"] = os.path.join(aof_dir, config["appendfilename"] + ".1.incr.aof")
+            open(config["aof_path"], "ab").close()
         flag = "--" + name
         if flag in sys.argv:
             config[name] = sys.argv[sys.argv.index(flag) + 1]

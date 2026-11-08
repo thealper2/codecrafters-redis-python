@@ -39,7 +39,17 @@ def encode_array(items):
 
 
 waiters = {}
-config = {"role": "master", "replid": "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb", "offset": 0, "dir": "", "dbfilename": ""}
+config = {
+    "role": "master", 
+    "replid": "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb", 
+    "offset": 0, 
+    "dir": "", 
+    "dbfilename": "",
+    "appendonly": "no",
+    "appenddirname": "appendonlydir",
+    "appendfilename": "appendonly.aof",
+    "appendfsync": "everysec",
+}
 EMPTY_RDB = bytes.fromhex(
     "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040"
     "fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000"
@@ -558,7 +568,7 @@ def main():
         host, mport = sys.argv[sys.argv.index("--replicaof") + 1].split()
         config["role"] = "slave"
         config["master"] = (host, int(mport))
-    for name in ("dir", "dbfilename"):
+    for name in ("dir", "dbfilename", "appendonly", "appenddirname", "appendfilename", "appendfsync"):
         flag = "--" + name
         if flag in sys.argv:
             config[name] = sys.argv[sys.argv.index(flag) + 1]

@@ -569,6 +569,8 @@ def main():
         config["role"] = "slave"
         config["master"] = (host, int(mport))
     for name in ("dir", "dbfilename", "appendonly", "appenddirname", "appendfilename", "appendfsync"):
+        if config["appendonly"] == "yes":
+            os.makedirs(os.path.join(config["dir"], config["appenddirname"]), exist_ok=True)
         flag = "--" + name
         if flag in sys.argv:
             config[name] = sys.argv[sys.argv.index(flag) + 1]

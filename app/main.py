@@ -424,6 +424,11 @@ def main():
     if config["role"] == "slave":
         master_conn  = socket.create_connection(config["master"])
         master_conn.sendall(encode_array([b"PING"]))
+        master_conn.recv(1024)
+        master_conn.sendall(encode_array([b"REPLCONF", b"listening-port", str(port).encode()]))
+        master_conn.recv(1024)
+        master_conn.sendall(encode_array([b"REPLCONF", b"capa", b"psync2"]))
+        master_conn.recv(1024)
         config["master_conn"] = master_conn
     
     while True:

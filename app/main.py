@@ -637,7 +637,7 @@ def execute(parts, connection, store, lock):
             connection.sendall(err)
         else:
             with lock:
-                entrty = store.get(key)
+                entry = store.get(key)
                 zset = entry[1] if entry is not None and entry[0] == b"zset" else {}
                 added = 0
                 for lon, lat, member in triples:

@@ -193,9 +193,9 @@ def geo_decode(score):
 
 def geo_dist(lon1, lat1, lon2, lat2):
     r = 6372797.560856
-    lat1r, lat2r = math.radins(lat1), math.radians(lat2)
+    lat1r, lat2r = math.radians(lat1), math.radians(lat2)
     u = math.sin((lat2r - lat1r) / 2)
-    v = math.sin(math.radins(lon2 - lon1) / 2)
+    v = math.sin(math.radians(lon2 - lon1) / 2)
     a = u * u + math.cos(lat1r) * math.cos(lat2r) * v * v
     return 2 * r * math.asin(math.sqrt(a))
 

@@ -384,7 +384,7 @@ def execute(parts, connection, store, lock):
                     if n >= need or remaining <= 0:
                         break
                     ack_cv.wait(remaining)
-        connection.sendall(b":" + str(len(replicas)).encode() + b"\r\n")
+        connection.sendall(b":" + str(n).encode() + b"\r\n")
 
 
 def handle_master(conn, store, lock):

@@ -341,6 +341,8 @@ def execute(parts, connection, store, lock):
             "master_repl_offset:" + str(config["offset"]),
         ])
         connection.sendall(encode_bulk(info.encode()))
+    elif cmd == b"REPLCONF":
+        connection.sendall(b"+OK\r\n")
     
 
 def handle_client(connection, store, lock):

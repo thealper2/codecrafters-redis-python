@@ -39,6 +39,11 @@ def encode_array(items):
 
 waiters = {}
 config = {"role": "master", "replid": "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb", "offset": 0}
+EMPTY_RDB = bytes.fromhex(
+    "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040"
+    "fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000"
+    "fff06e3bfec0ff5aa2"
+)
 versions = {}
 WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD")
 stream_cv = threading.Condition()
@@ -345,6 +350,7 @@ def execute(parts, connection, store, lock):
         connection.sendall(b"+OK\r\n")
     elif cmd == b"PSYNC":
         connection.sendall(b"+FULLRESYNC " + config["replid"].encode() + b" 0\r\n")
+        connection.sendall(b"$" + str(len(EMPTY_RDB)).encode() + b"\r\n" + EMPTY_RDB)
     
 
 def handle_client(connection, store, lock):

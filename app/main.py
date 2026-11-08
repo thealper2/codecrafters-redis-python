@@ -590,7 +590,6 @@ def main():
                 with open(manifest, "w") as f:
                     f.write("file " + aof_name + " seq 1 type i\n")
             config["aof_path"] = os.path.join(aof_dir, aof_name)
-            config["aof_file"] = open(config["aof_path"], "ab")
         flag = "--" + name
         if flag in sys.argv:
             config[name] = sys.argv[sys.argv.index(flag) + 1]
@@ -598,6 +597,19 @@ def main():
     store = {}
     lock = threading.Lock()
     load_rdb(store)
+    
+    if config["appendonly"] == "yes":
+        if os.path.exists(config["aof_path"]):
+            with open(config["aof_path"], "rb") as f:
+                buf = f.read()
+            while True:
+                result = parse_resp(buf)
+                if result is None:
+                    break
+                parts, consumed = result
+                buf = buf[consumed:]
+                execute(parts, Capture(), store, lock)
+        config["aof_file"] = open(config["aof_path"], "ab")
 
     if config["role"] == "slave":
         master_conn  = socket.create_connection(config["master"])

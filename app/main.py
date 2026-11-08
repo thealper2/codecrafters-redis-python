@@ -420,6 +420,12 @@ def main():
     server_socket = socket.create_server(("localhost", port), reuse_port=True)
     store = {}
     lock = threading.Lock()
+    
+    if config["role"] == "slave":
+        master_conn  = socket.create_connection(config["master"])
+        master_conn.sendall(encode_array([b"PING"]))
+        config["master_conn"] = master_conn
+    
     while True:
         connection, _ = server_socket.accept()
         thread = threading.Thread(target=handle_client, args=(connection, store, lock))

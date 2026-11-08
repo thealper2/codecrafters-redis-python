@@ -860,6 +860,14 @@ def handle_client(connection, store, lock):
                             if b"nopass" not in u["flags"]:
                                 u["flags"].append(b"nopass")
                     connection.sendall(b"+OK\r\n")
+                elif cmd == b"AUTH" and len(parts) >= 3::
+                    u = users.get(parts[1])
+                    h = hashlib.sha256(parts[2]).hexdigest().encode()
+                    if u is not None and (b"nopass" in u["flags"] or h in u["passwords"]):
+                        user = parts[1]
+                        connection.sendall(b"+OK\r\n")
+                    else:
+                        connection.sendall(b"-WRONGPASS invalid username-password pair or user is disabled.\r\n")
                 else:
                     execute(parts, connection, store, lock)
                     

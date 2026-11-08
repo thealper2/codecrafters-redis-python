@@ -750,6 +750,7 @@ def handle_client(connection, store, lock):
         queue = []
         watched = {}
         subs = set()
+        user = b"default"
         while True:
             data = connection.recv(1024)
             if not data:
@@ -832,6 +833,8 @@ def handle_client(connection, store, lock):
                             b"*3\r\n" + encode_bulk(b"unsubscribe") + encode_bulk(ch)
                             + b":" + str(len(subs)).encode() + b"\r\n"
                         )
+                elif cmd == b"ACL" and len(parts) >= 2 and parts[1].upper() == b"WHOAMI":
+                    connection.sendall(encode_bulk(user))
                 else:
                     execute(parts, connection, store, lock)
                     

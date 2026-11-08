@@ -4,6 +4,7 @@ import time
 from collections import deque
 import sys
 import os
+import math
 
 def parse_resp(data):
     if not data or data[0:1] != b"*":
@@ -188,6 +189,15 @@ def geo_decode(score):
     lat = MIN_LAT + lat_step * (lat_i + 0.5)
     lon = MIN_LON + lon_step * (lon_i + 0.5)
     return lon, lat
+
+
+def geo_dist(lon1, lat1, lon2, lat2):
+    r = 6372797.560856
+    lat1r, lat2r = math.radins(lat1), math.radians(lat2)
+    u = math.sin((lat2r - lat1r) / 2)
+    v = math.sin(math.radins(lon2 - lon1) / 2)
+    a = u * u + math.cos(lat1r) * math.cos(lat2r) * v * v
+    return 2 * r * math.asin(math.sqrt(a))
 
 
 class Capture:
@@ -677,6 +687,17 @@ def execute(parts, connection, store, lock):
                 lon, lat = geo_decode(s)
                 out += encode_array([repr(lon).encode(), repr(lat).encode()])
         connection.sendall(out)
+    elif cmd == b"GEODIST" and len(parts) >= 4:
+        with lock:
+            entry = store.get(parts[1])
+            zset = entry[1] if entry is not None and entry[0] == b"zset" else {}
+            s1 = zset.get(parts[2])
+            s2 = zset.get(parts[3])
+        if s1 is None or s2 is None:
+            connection.sendall(b"$-1\r\n")
+        else:
+            d = geo_dist(*geo_decode(s1), *geo_decode(s2))
+            connection.sendall(encode_bulk(("%.4f" % d).encode()))
 
 def handle_master(conn, store, lock):
     buffer = b""

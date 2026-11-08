@@ -60,7 +60,7 @@ replicas = []
 channels = {}
 acks = {}
 ack_cv = threading.Condition()
-WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD", b"ZADD", b"ZREM", b"SETBIT", b"BITOP")
+WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD", b"ZADD", b"ZREM", b"SETBIT", b"BITOP", b"GEOADD")
 stream_cv = threading.Condition()
 
 def read_streams(store, lock, keys, ids):
@@ -155,6 +155,21 @@ def encode_entries(entries):
 
 def zsorted(zset):
     return sorted(zset, key=lambda m: (zset[m], m))
+
+MIN_LAT, MAX_LAT = -85.05112878, 85.05112878
+MIN_LON, MAX_LON = -180.0, 180.0
+
+def spread(v):
+    r = 0
+    for i in range(26):
+        r |= ((v >> i) & 1) << (2 * i)
+    return r
+
+
+def geo_encode(lon, lat):
+    lat_i = int((lat - MIN_LAT) / (MAX_LAT - MIN_LAT) * (1 << 26))
+    lon_i = int((lon - MIN_LON) / (MAX_LON - MIN_LON) * (1 << 26))
+    return spread(lat_i) | (spread(lon_i) << 1)
 
 
 class Capture:
@@ -607,6 +622,30 @@ def execute(parts, connection, store, lock):
             else:
                 store.pop(dest, None)
         connection.sendall(b":" + str(size).encode() + b"\r\n")
+    elif cmd == b"GEOADD" and len(parts) >= 5:
+        key = parts[1]
+        err = None
+        triples = []
+        for i in range(2, len(parts) - 2, 3):
+            lon = float(parts[i])
+            lat = float(parts[i + 1])
+            if not (MIN_LON <= lon <= MAX_LON and MIN_LAT <= lat <= MAX_LAT):
+                err = b"-ERR invalid longitude,latitude pair %.6f,%.6f\r\n" % (lon, lat)
+                break
+            triples.append((lon, lat, parts[i + 2]))
+        if err:
+            connection.sendall(err)
+        else:
+            with lock:
+                entrty = store.get(key)
+                zset = entry[1] if entry is not None and entry[0] == b"zset" else {}
+                added = 0
+                for lon, lat, member in triples:
+                    if member not in zset:
+                        added += 1
+                    zset[member] = float(geo_encode(lon, lat))
+                store[key] = (b"zset", zset, None)
+            connection.sendall(b":" + str(added).encode() + b"\r\n")
 
 def handle_master(conn, store, lock):
     buffer = b""

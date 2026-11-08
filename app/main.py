@@ -45,6 +45,7 @@ EMPTY_RDB = bytes.fromhex(
     "fff06e3bfec0ff5aa2"
 )
 versions = {}
+replicas = []
 WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD")
 stream_cv = threading.Condition()
 
@@ -93,6 +94,8 @@ def execute(parts, connection, store, lock):
     if cmd in WRITE_CMDS and len(parts) >= 2:
         with lock:
             versions[parts[1]] = versions.get(parts[1], 0) + 1
+            for r in replicas:
+                r.sendall(encode_array(parts))
     if cmd == b"PING":
         connection.sendall(b"+PONG\r\n")
     elif cmd == b"ECHO" and len(parts) >= 2:
@@ -351,6 +354,7 @@ def execute(parts, connection, store, lock):
     elif cmd == b"PSYNC":
         connection.sendall(b"+FULLRESYNC " + config["replid"].encode() + b" 0\r\n")
         connection.sendall(b"$" + str(len(EMPTY_RDB)).encode() + b"\r\n" + EMPTY_RDB)
+        replicas.append(connection)
     
 
 def handle_client(connection, store, lock):

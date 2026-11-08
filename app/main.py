@@ -60,7 +60,7 @@ replicas = []
 channels = {}
 acks = {}
 ack_cv = threading.Condition()
-WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD", b"ZADD", b"ZREM", b"SETBIT")
+WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD", b"ZADD", b"ZREM", b"SETBIT", b"BITOP")
 stream_cv = threading.Condition()
 
 def read_streams(store, lock, keys, ids):
@@ -581,6 +581,32 @@ def execute(parts, connection, store, lock):
             buf = buf[int(parts[2]):int(parts[3]) + 1]
         n = sum(bin(b).count("1") for b in buf)
         connection.sendall(b":" + str(n).encode() + b"\r\n")
+    elif cmd == b"BITOP" and len(parts) >= 4:
+        op = parts[1].upper()
+        dest = parts[2]
+        with lock:
+            srcs = []
+            for k in parts[3:]:
+                entry = store.get(k)
+                srcs.append(entry[0] if entry is not None and len(entry) == 2 else b"")
+            size = max(len(s) for s in srcs)
+            srcs = [s.ljust(size, b"\x00") for s in srcs]
+            out = bytearray(srcs[0])
+            for s in srcs[1:]:
+                for i in range(size):
+                    if op == b"AND":
+                        out[i] &= s[i]
+                    elif op == b"OR":
+                        out[i] |= s[i]
+                    elif op == b"XOR":
+                        out[i] ^= s[i]
+            if op == b"NOT":
+                out = bytearray((~b) & 0xFF for b in out)
+            if size:
+                store[dest] = bytes(out), None)
+            else:
+                store.pop(dest, None)
+        connection.sendall(b":" + str(size).encode() + b"\r\n")
 
 def handle_master(conn, store, lock):
     buffer = b""

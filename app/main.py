@@ -461,9 +461,10 @@ def main():
     server_socket = socket.create_server(("localhost", port), reuse_port=True)
     store = {}
     lock = threading.Lock()
-    
     if config["role"] == "slave":
         threading.Thread(target=handle_master, args=(config["master_conn"], store, lock), daemon=True).start()
+    
+    if config["role"] == "slave":
         master_conn  = socket.create_connection(config["master"])
         master_conn.sendall(encode_array([b"PING"]))
         master_conn.recv(1024)

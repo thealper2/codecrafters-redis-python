@@ -572,12 +572,19 @@ def main():
         if config["appendonly"] == "yes":
             aof_dir = os.path.join(config["dir"], config["appenddirname"])
             os.makedirs(aof_dir, exist_ok=True)
-            config["aof_path"] = os.path.join(aof_dir, config["appendfilename"] + ".1.incr.aof")
-            open(config["aof_path"], "ab").close()
             manifest = os.path.join(aof_dir, config["appendfilename"] + ".manifest")
+            aof_name = config["appendfilename"] + ".1.incr.aof"
             if not os.path.exists(manifest):
+                with open(manifest) as f:
+                    for line in f:
+                        tokens = line.split()
+                        if "file" in tokens and "type" in tokens and tokens[tokens.index("type") + 1] == "i":
+                            aof_name = tokens[tokens.index("file") + 1]
+            else:
                 with open(manifest, "w") as f:
-                    f.write("file " + config["appendfilename"] + ".1.incr.aof seq 1 type i\n")
+                    f.write("file " + aof_name + " seq 1 type i\n")
+            config["aof_path"] = os.path.join(aof_dir, aof_name)
+            config["aof_file"] = open(config["aof_path"], "ab")
         flag = "--" + name
         if flag in sys.argv:
             config[name] = sys.argv[sys.argv.index(flag) + 1]

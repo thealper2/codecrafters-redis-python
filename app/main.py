@@ -59,6 +59,7 @@ EMPTY_RDB = bytes.fromhex(
 versions = {}
 replicas = []
 channels = {}
+users = {b"default": {"flags": [], "passwords": []}}
 acks = {}
 ack_cv = threading.Condition()
 WRITE_CMDS = (b"SET", b"INCR", b"RPUSH", b"LPUSH", b"LPOP", b"BLPOP", b"XADD", b"ZADD", b"ZREM", b"SETBIT", b"BITOP", b"GEOADD")
@@ -835,6 +836,12 @@ def handle_client(connection, store, lock):
                         )
                 elif cmd == b"ACL" and len(parts) >= 2 and parts[1].upper() == b"WHOAMI":
                     connection.sendall(encode_bulk(user))
+                elif cmd == b"ACL" and len(parts) >= 2 and parts[1].upper() == b"GETUSER":
+                    u = users.get(parts[2])
+                    if u is None:
+                        connection.sendall(b"*-1\r\n")
+                    else:
+                        connection.sendall(b"*2\r\n" + encode_bulk(b"flags") + encode_array(u["flags"]))
                 else:
                     execute(parts, connection, store, lock)
                     

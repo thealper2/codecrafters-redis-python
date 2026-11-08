@@ -603,7 +603,7 @@ def execute(parts, connection, store, lock):
             if op == b"NOT":
                 out = bytearray((~b) & 0xFF for b in out)
             if size:
-                store[dest] = bytes(out), None)
+                store[dest] = (bytes(out), None)
             else:
                 store.pop(dest, None)
         connection.sendall(b":" + str(size).encode() + b"\r\n")

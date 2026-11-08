@@ -560,6 +560,14 @@ def execute(parts, connection, store, lock):
                 buf[byte_i] &= ~mask & 0xFF
             store[key] = (bytes(buf), expiry)
         connection.sendall(b":" + str(old).encode() + b"\r\n")
+    elif cmd == b"GETBIT" and len(parts) >= 3:
+        offset = int(parts[2])
+        with lock:
+            entry = store.get(parts[1])
+            buf = entry[0] if entry is not None and len(entry) == 2 else b""
+        byte_i, bit_i = divmod(offset, 8)
+        bit = 1 if byte_i < len(buf) and buf[byte_i] & (0x80 >> bit_i) else 0
+        connection.sendall(b":" + str(bit).encode() + b"\r\n")
 
 def handle_master(conn, store, lock):
     buffer = b""

@@ -153,6 +153,10 @@ def encode_entries(entries):
     return out
 
 
+def zsorted(set):
+    return sorted(zset, key=lambda m: (zset[m], m))
+
+
 class Capture:
     def __init__(self):
         self.data = b""
@@ -488,6 +492,15 @@ def execute(parts, connection, store, lock):
                 zset[member] = score
             store[key] = (b"zset", zset, None)
         connection.sendall(b":" + str(added).encode() + b"\r\n")
+    elif cmd == b"ZRANK" and len(parts) >= 3:
+        with lock:
+            entry = store.get(parts[1])
+            zset = entry[1] if entry is not None and entry[0] == b"zset" else {}
+            rank = zsorted(zset).index(parts[2]) if parts[2] in zset else None
+        if rank is None:
+            connection.sendall(b"$-1\r\n")
+        else:
+            connection.sendall(b":" + str(rank).encode() + b"\r\n")
 
 def handle_master(conn, store, lock):
     buffer = b""

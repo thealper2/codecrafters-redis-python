@@ -467,7 +467,13 @@ def execute(parts, connection, store, lock):
         with lock:
             keys = list(store.keys())
         connection.sendall(encode_array(keys))
-
+    elif cmd == b"PUBLISH" and len(parts) >= 3:
+        with lock:
+            subscribers = list(channels.get(parts[1], ()))
+        msg = encode_array([b"message", parts[1], parts[2]])
+        for s in subscribers:
+            s.sendall(msg)
+        connection.sendall(b":" + str(len(subscribers)).encode() + b"\r\n")
 
 def handle_master(conn, store, lock):
     buffer = b""

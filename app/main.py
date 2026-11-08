@@ -573,6 +573,14 @@ def execute(parts, connection, store, lock):
             entry = store.get(parts[1])
             n = len(entry[0]) if entry is not None and len(entry) == 2 else 0
         connection.sendall(b":" + str(n).encode() + b"\r\n")
+    elif cmd == b"BITCOUNT" and len(parts) >= 2:
+        with lock:
+            entry = store.get(parts[1])
+            buf = entry[0] if entry is not None and len(entry) == 2 else b""
+        if len(parts) >= 4:
+            buf = buf[int(parts[2]):int(parts[3]) + 1]
+        n = sum(bin(b).count("1") for b in buf)
+        connection.sendall(b":" + str(n).encode() + b"\r\n")
 
 def handle_master(conn, store, lock):
     buffer = b""

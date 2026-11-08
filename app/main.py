@@ -587,6 +587,15 @@ def handle_client(connection, store, lock):
                             b"*3\r\n" + encode_bulk(b"subscribe") + encode_bulk(ch)
                             + b":" + str(len(subs)).encode() + b"\r\n"
                         )
+                elif cmd == b"UNSUBSCRIBE":
+                    for ch in (parts[1:] or list(subs)):
+                        subs.discard(ch)
+                        with lock:
+                            channels.get(ch, set()).discard(connection)
+                        connection.sendall(
+                            b"*3\r\n" + encode_bulk(b"unsubscribe") + encode_bulk(ch)
+                            + b":" + str(len(subs)).encode() + b"\r\n"
+                        )
                 else:
                     execute(parts, connection, store, lock)
                     
